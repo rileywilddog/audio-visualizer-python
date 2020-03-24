@@ -1,14 +1,16 @@
-import sys, io, os
-from PyQt4 import QtCore, QtGui, uic
-from PyQt4.QtGui import QPainter, QColor
-from os.path import expanduser
-import subprocess as sp
-import numpy
-from PIL import Image, ImageDraw, ImageFont
-from PIL.ImageQt import ImageQt
-import tempfile
-from shutil import rmtree
 import atexit
+import errno
+import io
+import numpy
+import os
+from PIL import Image, ImageDraw
+from PIL.ImageQt import ImageQt
+from PyQt5.QtCore import QBuffer, QIODevice
+from PyQt5.QtGui import QColor, QFontMetrics, QPainter, QImage
+from shutil import rmtree
+import subprocess
+import sys
+import tempfile
 
 
 class Core:
@@ -25,11 +27,17 @@ class Core:
             return "ffmpeg.exe"
         else:
             try:
-                with open(os.devnull, "w") as f:
-                    sp.check_call(["ffmpeg", "-version"], stdout=f, stderr=f)
+                subprocess.check_call(
+                    ["ffmpeg", "-version"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
                 return "ffmpeg"
-            except:
-                return "avconv"
+            except OSError as e:
+                if e.errno == errno.ENOENT:
+                    return "avconv"
+                else:
+                    raise
 
     def parseBaseImage(self, backgroundImage, preview=False):
         """ determines if the base image is a single frame or list of frames """
@@ -59,7 +67,7 @@ class Core:
         else:
             im = Image.open(backgroundFile)
 
-        if self._image == None or not self.lastBackgroundImage == backgroundFile:
+        if self._image is None or not self.lastBackgroundImage == backgroundFile:
             self.lastBackgroundImage = backgroundFile
 
             # resize if necessary
@@ -68,7 +76,7 @@ class Core:
 
             self._image = ImageQt(im)
 
-        self._image1 = QtGui.QImage(self._image)
+        self._image1 = QImage(self._image)
         painter = QPainter(self._image1)
         font = titleFont
         font.setPixelSize(fontSize)
@@ -77,7 +85,7 @@ class Core:
 
         yPosition = yOffset
 
-        fm = QtGui.QFontMetrics(font)
+        fm = QFontMetrics(font)
         if alignment == 0:  # Left
             xPosition = xOffset
         if alignment == 1:  # Middle
@@ -87,8 +95,8 @@ class Core:
         painter.drawText(xPosition, yPosition, titleText)
         painter.end()
 
-        buffer = QtCore.QBuffer()
-        buffer.open(QtCore.QIODevice.ReadWrite)
+        buffer = QBuffer()
+        buffer.open(QIODevice.ReadWrite)
         self._image1.save(buffer, "PNG")
 
         strio = io.BytesIO()
@@ -137,7 +145,9 @@ class Core:
             "1",  # mono (set to '2' for stereo)
             "-",
         ]
-        in_pipe = sp.Popen(command, stdout=sp.PIPE, stderr=sp.DEVNULL, bufsize=10 ** 8)
+        in_pipe = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10 ** 8
+        )
 
         completeAudioArray = numpy.empty(0, dtype="int16")
 
@@ -179,8 +189,8 @@ class Core:
         paddedSampleSize = 2048
         paddedData = numpy.pad(data, (0, paddedSampleSize - sampleSize), "constant")
         spectrum = numpy.fft.fft(paddedData)
-        sample_rate = 44100
-        frequencies = numpy.fft.fftfreq(len(spectrum), 1.0 / sample_rate)
+        # sample_rate = 44100
+        # frequencies = numpy.fft.fftfreq(len(spectrum), 1.0 / sample_rate)
 
         y = abs(spectrum[0 : int(paddedSampleSize / 2) - 1])
 
@@ -204,7 +214,7 @@ class Core:
         else:
             lastSpectrum = y
 
-        x = frequencies[0 : int(paddedSampleSize / 2) - 1]
+        # x = frequencies[0 : int(paddedSampleSize / 2) - 1]
 
         return lastSpectrum
 
@@ -225,7 +235,7 @@ class Core:
         else:
             filename = "$frame%05d.jpg"
             options = ""
-        sp.call(
+        subprocess.call(
             '%s -i "%s" -y %s "%s"'
             % (
                 self.FFMPEG_BIN,
@@ -248,5 +258,5 @@ class Core:
                 if i > 255 or i < 0:
                     raise ValueError
             return tup
-        except:
+        except Exception:
             return (255, 255, 255)

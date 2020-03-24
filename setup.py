@@ -1,4 +1,5 @@
 from cx_Freeze import setup, Executable
+import sys
 
 # Dependencies are automatically detected, but it might need
 # fine tuning.
@@ -19,8 +20,6 @@ buildOptions = dict(
     ],
     include_files=["main.ui"],
 )
-
-import sys
 
 base = "Win32GUI" if sys.platform == "win32" else None
 

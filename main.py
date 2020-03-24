@@ -1,27 +1,25 @@
-import sys, io, os
-from PyQt4 import QtCore, QtGui, uic
-from PyQt4.QtGui import QPainter, QColor, QFont
-from os.path import expanduser
-import subprocess as sp
-import numpy
-from PIL import Image, ImageDraw, ImageFont
-from PIL.ImageQt import ImageQt
 import atexit
+import os
+from os.path import expanduser
 from queue import Queue
-from PyQt4.QtCore import QSettings
 import signal
+import sys
+from PyQt5 import uic
+from PyQt5.QtGui import QColor, QFont, QPixmap
+from PyQt5.QtCore import pyqtSignal, QObject, QSettings, QThread, QTimer
+from PyQt5.QtWidgets import QApplication, QColorDialog, QDesktopWidget, QFileDialog
 
-import preview_thread, core, video_thread
+import core
+import preview_thread
+import video_thread
 
 
-class Command(QtCore.QObject):
+class Command(QObject):
 
-    videoTask = QtCore.pyqtSignal(
-        str, str, QFont, int, int, int, int, tuple, tuple, str, str
-    )
+    videoTask = pyqtSignal(str, str, QFont, int, int, int, int, tuple, tuple, str, str)
 
     def __init__(self):
-        QtCore.QObject.__init__(self)
+        QObject.__init__(self)
 
         import argparse
 
@@ -120,9 +118,7 @@ class Command(QtCore.QObject):
         else:
             self.textY = int(self.settings.value("yPosition", 375))
 
-        ffmpeg_cmd = self.settings.value("ffmpeg_cmd", expanduser("~"))
-
-        self.videoThread = QtCore.QThread(self)
+        self.videoThread = QThread(self)
         self.videoWorker = video_thread.Worker(self)
 
         self.videoWorker.moveToThread(self.videoThread)
@@ -159,18 +155,16 @@ class Command(QtCore.QObject):
         sys.exit(0)
 
 
-class Main(QtCore.QObject):
+class Main(QObject):
 
-    newTask = QtCore.pyqtSignal(str, str, QFont, int, int, int, int, tuple, tuple)
-    processTask = QtCore.pyqtSignal()
-    videoTask = QtCore.pyqtSignal(
-        str, str, QFont, int, int, int, int, tuple, tuple, str, str
-    )
+    newTask = pyqtSignal(str, str, QFont, int, int, int, int, tuple, tuple)
+    processTask = pyqtSignal()
+    videoTask = pyqtSignal(str, str, QFont, int, int, int, int, tuple, tuple, str, str)
 
     def __init__(self, window):
-        QtCore.QObject.__init__(self)
+        QObject.__init__(self)
 
-        # print('main thread id: {}'.format(QtCore.QThread.currentThreadId()))
+        # print('main thread id: {}'.format(QThread.currentThreadId()))
         self.window = window
         self.core = core.Core()
         self.settings = QSettings("settings.ini", QSettings.IniFormat)
@@ -185,7 +179,7 @@ class Main(QtCore.QObject):
 
         self.previewQueue = Queue()
 
-        self.previewThread = QtCore.QThread(self)
+        self.previewThread = QThread(self)
         self.previewWorker = preview_thread.Worker(self, self.previewQueue)
 
         self.previewWorker.moveToThread(self.previewThread)
@@ -193,7 +187,7 @@ class Main(QtCore.QObject):
 
         self.previewThread.start()
 
-        self.timer = QtCore.QTimer(self)
+        self.timer = QTimer(self)
         self.timer.timeout.connect(self.processTask.emit)
         self.timer.start(500)
 
@@ -243,20 +237,20 @@ class Main(QtCore.QObject):
         window.pushButton_visColor.setStyleSheet(btnStyle)
 
         titleFont = self.settings.value("titleFont")
-        if not titleFont == None:
+        if titleFont is not None:
             window.fontComboBox.setCurrentFont(QFont(titleFont))
 
         alignment = self.settings.value("alignment")
-        if not alignment == None:
+        if alignment is not None:
             window.alignmentComboBox.setCurrentIndex(int(alignment))
         fontSize = self.settings.value("fontSize")
-        if not fontSize == None:
+        if fontSize is not None:
             window.fontsizeSpinBox.setValue(int(fontSize))
         xPosition = self.settings.value("xPosition")
-        if not xPosition == None:
+        if xPosition is not None:
             window.textXSpinBox.setValue(int(xPosition))
         yPosition = self.settings.value("yPosition")
-        if not yPosition == None:
+        if yPosition is not None:
             window.textYSpinBox.setValue(int(yPosition))
 
         window.fontComboBox.currentFontChanged.connect(self.drawPreview)
@@ -292,12 +286,12 @@ class Main(QtCore.QObject):
     def openInputFileDialog(self):
         inputDir = self.settings.value("inputDir", expanduser("~"))
 
-        fileName = QtGui.QFileDialog.getOpenFileName(
+        fileName = QFileDialog.getOpenFileName(
             self.window,
             "Open Music File",
             inputDir,
             "Music Files (*.mp3 *.wav *.ogg *.flac)",
-        )
+        )[0]
 
         if not fileName == "":
             self.settings.setValue("inputDir", os.path.dirname(fileName))
@@ -306,9 +300,9 @@ class Main(QtCore.QObject):
     def openOutputFileDialog(self):
         outputDir = self.settings.value("outputDir", expanduser("~"))
 
-        fileName = QtGui.QFileDialog.getSaveFileName(
-            self.window, "Set Output Video File", outputDir, "Video Files (*.mkv)"
-        )
+        fileName = QFileDialog.getSaveFileName(
+            self.window, "Set Output Video File", outputDir, "Video Files (*.mp4)"
+        )[0]
 
         if not fileName == "":
             self.settings.setValue("outputDir", os.path.dirname(fileName))
@@ -317,12 +311,12 @@ class Main(QtCore.QObject):
     def openBackgroundFileDialog(self):
         backgroundDir = self.settings.value("backgroundDir", expanduser("~"))
 
-        fileName = QtGui.QFileDialog.getOpenFileName(
+        fileName = QFileDialog.getOpenFileName(
             self.window,
             "Open Background Image",
             backgroundDir,
             "Image Files (*.jpg *.png);; Video Files (*.mp4)",
-        )
+        )[0]
 
         if not fileName == "":
             self.settings.setValue("backgroundDir", os.path.dirname(fileName))
@@ -330,9 +324,17 @@ class Main(QtCore.QObject):
         self.drawPreview()
 
     def createAudioVisualisation(self):
-        ffmpeg_cmd = self.settings.value("ffmpeg_cmd", expanduser("~"))
+        if self.window.label_input.text() == "":
+            self.progressBarSetText("Error: No input")
+            return
+        if self.window.label_output.text() == "":
+            self.progressBarSetText("Error: No output")
+            return
+        if self.window.label_background.text() == "":
+            self.progressBarSetText("Error: No background")
+            return
 
-        self.videoThread = QtCore.QThread(self)
+        self.videoThread = QThread(self)
         self.videoWorker = video_thread.Worker(self)
 
         self.videoWorker.moveToThread(self.videoThread)
@@ -381,12 +383,12 @@ class Main(QtCore.QObject):
 
     def showPreviewImage(self, image):
         self._scaledPreviewImage = image
-        self._previewPixmap = QtGui.QPixmap.fromImage(self._scaledPreviewImage)
+        self._previewPixmap = QPixmap.fromImage(self._scaledPreviewImage)
 
         self.window.label_preview.setPixmap(self._previewPixmap)
 
     def pickColor(self, colorTarget):
-        color = QtGui.QColorDialog.getColor()
+        color = QColorDialog.getColor()
         if color.isValid():
             RGBstring = "%s,%s,%s" % (
                 str(color.red()),
@@ -406,21 +408,23 @@ class Main(QtCore.QObject):
 
 if len(sys.argv) > 1:
     # command line mode
-    app = QtGui.QApplication(sys.argv, False)
+    app = QApplication(sys.argv, False)
     command = Command()
     signal.signal(signal.SIGINT, command.cleanUp)
     sys.exit(app.exec_())
 else:
     # gui mode
     if __name__ == "__main__":
-        app = QtGui.QApplication(sys.argv)
+        app = QApplication(sys.argv)
         window = uic.loadUi("main.ui")
         # window.adjustSize()
-        desc = QtGui.QDesktopWidget()
+        desc = QDesktopWidget()
         dpi = desc.physicalDpiX()
         topMargin = 0 if (dpi == 96) else int(10 * (dpi / 96))
 
-        window.resize(window.width() * (dpi / 96), window.height() * (dpi / 96))
+        window.resize(
+            int(window.width() * (dpi / 96)), int(window.height() * (dpi / 96))
+        )
         window.verticalLayout_2.setContentsMargins(0, topMargin, 0, 0)
 
         main = Main(window)

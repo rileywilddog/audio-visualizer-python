@@ -1,25 +1,23 @@
-from PyQt4 import QtCore, QtGui, uic
-from PyQt4.QtCore import pyqtSignal, pyqtSlot
-from PIL import Image, ImageDraw, ImageFont
-from PIL.ImageQt import ImageQt
+from PyQt5.QtCore import pyqtSignal, pyqtSlot, QObject
+from PyQt5.QtGui import QFont
 import core
 import numpy
 import subprocess as sp
 import sys
 
 
-class Worker(QtCore.QObject):
+class Worker(QObject):
 
     videoCreated = pyqtSignal()
     progressBarUpdate = pyqtSignal(int)
     progressBarSetText = pyqtSignal(str)
 
     def __init__(self, parent=None):
-        QtCore.QObject.__init__(self)
+        QObject.__init__(self)
         parent.videoTask.connect(self.createVideo)
         self.core = core.Core()
 
-    @pyqtSlot(str, str, QtGui.QFont, int, int, int, int, tuple, tuple, str, str)
+    @pyqtSlot(str, str, QFont, int, int, int, int, tuple, tuple, str, str)
     def createVideo(
         self,
         backgroundImage,
@@ -34,7 +32,7 @@ class Worker(QtCore.QObject):
         inputFile,
         outputFile,
     ):
-        # print('worker thread id: {}'.format(QtCore.QThread.currentThreadId()))
+        # print('worker thread id: {}'.format(QThread.currentThreadId()))
         def getBackgroundAtIndex(i):
             return self.core.drawBaseImage(
                 backgroundFrames[i],
@@ -74,6 +72,7 @@ class Worker(QtCore.QObject):
 
         ffmpegCommand = [
             self.core.FFMPEG_BIN,
+            "-hide_banner",
             "-y",  # (optional) means overwrite the output file if it already exists.
             "-f",
             "rawvideo",
@@ -86,8 +85,7 @@ class Worker(QtCore.QObject):
             "-r",
             "30",  # frames per second
             "-i",
-            "-",  # The input comes from a pipe
-            "-an",
+            "-",  # video input comes from a pipe
             "-i",
             inputFile,
             "-acodec",
@@ -131,7 +129,7 @@ class Worker(QtCore.QObject):
                 smoothConstantUp,
                 lastSpectrum,
             )
-            if imBackground != None:
+            if imBackground is not None:
                 im = self.core.drawBars(lastSpectrum, imBackground, visColor)
             else:
                 im = self.core.drawBars(

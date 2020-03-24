@@ -1,25 +1,23 @@
-from PyQt4 import QtCore, QtGui, uic
-from PyQt4.QtCore import pyqtSignal, pyqtSlot
-from PIL import Image, ImageDraw, ImageFont
+from PyQt5.QtCore import pyqtSignal, pyqtSlot, QObject, Qt
+from PyQt5.QtGui import QFont, QImage
 from PIL.ImageQt import ImageQt
 import core
-import time
-from queue import Queue, Empty
+from queue import Empty
 import numpy
 
 
-class Worker(QtCore.QObject):
+class Worker(QObject):
 
     imageCreated = pyqtSignal(["QImage"])
 
     def __init__(self, parent=None, queue=None):
-        QtCore.QObject.__init__(self)
+        QObject.__init__(self)
         parent.newTask.connect(self.createPreviewImage)
         parent.processTask.connect(self.process)
         self.core = core.Core()
         self.queue = queue
 
-    @pyqtSlot(str, str, QtGui.QFont, int, int, int, int, tuple, tuple)
+    @pyqtSlot(str, str, QFont, int, int, int, int, tuple, tuple)
     def createPreviewImage(
         self,
         backgroundImage,
@@ -32,7 +30,7 @@ class Worker(QtCore.QObject):
         textColor,
         visColor,
     ):
-        # print('worker thread id: {}'.format(QtCore.QThread.currentThreadId()))
+        # print('worker thread id: {}'.format(QThread.currentThreadId()))
         dic = {
             "backgroundImage": backgroundImage,
             "titleText": titleText,
@@ -82,10 +80,10 @@ class Worker(QtCore.QObject):
             im = self.core.drawBars(spectrum, im, nextPreviewInformation["visColor"])
 
             self._image = ImageQt(im)
-            self._previewImage = QtGui.QImage(self._image)
+            self._previewImage = QImage(self._image)
 
             self._scaledPreviewImage = self._previewImage.scaled(
-                320, 180, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.SmoothTransformation
+                320, 180, Qt.IgnoreAspectRatio, Qt.SmoothTransformation
             )
 
             self.imageCreated.emit(self._scaledPreviewImage)
