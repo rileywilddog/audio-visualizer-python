@@ -12,35 +12,41 @@ class Worker(QObject):
 
     def __init__(self, parent=None, queue=None):
         QObject.__init__(self)
-        parent.newTask.connect(self.createPreviewImage)
+        parent.previewTask.connect(self.createPreviewImage)
         parent.processTask.connect(self.process)
         self.core = core.Core()
         self.queue = queue
 
-    @pyqtSlot(str, str, QFont, int, int, int, int, tuple, tuple)
+    @pyqtSlot(str, str, QFont, int, int, int, int, int, tuple, tuple, int, int)
     def createPreviewImage(
         self,
         backgroundImage,
         titleText,
         titleFont,
-        fontSize,
         alignment,
         xOffset,
         yOffset,
+        xResolution,
+        yResolution,
         textColor,
         visColor,
+        previewXResolution,
+        previewYResolution,
     ):
         # print('worker thread id: {}'.format(QThread.currentThreadId()))
         dic = {
             "backgroundImage": backgroundImage,
             "titleText": titleText,
             "titleFont": titleFont,
-            "fontSize": fontSize,
             "alignment": alignment,
             "xoffset": xOffset,
             "yoffset": yOffset,
+            "xResolution": xResolution,
+            "yResolution": yResolution,
             "textColor": textColor,
             "visColor": visColor,
+            "previewXResolution": previewXResolution,
+            "previewYResolution": previewYResolution,
         }
         self.queue.put(dic)
 
@@ -66,10 +72,11 @@ class Worker(QObject):
                 bgImage,
                 nextPreviewInformation["titleText"],
                 nextPreviewInformation["titleFont"],
-                nextPreviewInformation["fontSize"],
                 nextPreviewInformation["alignment"],
                 nextPreviewInformation["xoffset"],
                 nextPreviewInformation["yoffset"],
+                nextPreviewInformation["xResolution"],
+                nextPreviewInformation["yResolution"],
                 nextPreviewInformation["textColor"],
                 nextPreviewInformation["visColor"],
             )
@@ -77,13 +84,22 @@ class Worker(QObject):
                 lambda x: 0.008 * (x - 128) ** 2, (255,), dtype="int16"
             )
 
-            im = self.core.drawBars(spectrum, im, nextPreviewInformation["visColor"])
+            im = self.core.drawBars(
+                spectrum,
+                im,
+                nextPreviewInformation["visColor"],
+                nextPreviewInformation["xResolution"],
+                nextPreviewInformation["yResolution"],
+            )
 
             self._image = ImageQt(im)
             self._previewImage = QImage(self._image)
 
             self._scaledPreviewImage = self._previewImage.scaled(
-                320, 180, Qt.IgnoreAspectRatio, Qt.SmoothTransformation
+                nextPreviewInformation["previewXResolution"],
+                nextPreviewInformation["previewYResolution"],
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
             )
 
             self.imageCreated.emit(self._scaledPreviewImage)

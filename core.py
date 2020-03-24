@@ -16,6 +16,7 @@ import tempfile
 class Core:
     def __init__(self):
         self.lastBackgroundImage = ""
+        self.lastBackgroundResolution = (0, 0)
         self._image = None
 
         self.FFMPEG_BIN = self.findFfmpeg()
@@ -45,7 +46,7 @@ class Core:
             return []
         else:
             _, bgExt = os.path.splitext(backgroundImage)
-            if not bgExt == ".mp4":
+            if bgExt not in [".mp4", ".mkv"]:
                 return [backgroundImage]
             else:
                 return self.getVideoFrames(backgroundImage, preview)
@@ -55,43 +56,50 @@ class Core:
         backgroundFile,
         titleText,
         titleFont,
-        fontSize,
         alignment,
         xOffset,
         yOffset,
+        xResolution,
+        yResolution,
         textColor,
         visColor,
     ):
         if backgroundFile == "":
-            im = Image.new("RGB", (1280, 720), "black")
+            im = Image.new("RGB", (xResolution, yResolution), "black")
         else:
             im = Image.open(backgroundFile)
 
-        if self._image is None or not self.lastBackgroundImage == backgroundFile:
+        if (
+            self._image is None
+            or not self.lastBackgroundImage == backgroundFile
+            or not self.lastBackgroundResolution == (xResolution, yResolution)
+        ):
+            self.lastBackgroundResolution = (xResolution, yResolution)
             self.lastBackgroundImage = backgroundFile
 
             # resize if necessary
-            if not im.size == (1280, 720):
-                im = im.resize((1280, 720), Image.ANTIALIAS)
+            if not im.size == (xResolution, yResolution):
+                im = im.resize((xResolution, yResolution), Image.ANTIALIAS)
 
             self._image = ImageQt(im)
 
         self._image1 = QImage(self._image)
         painter = QPainter(self._image1)
         font = titleFont
-        font.setPixelSize(fontSize)
         painter.setFont(font)
         painter.setPen(QColor(*textColor))
 
-        yPosition = yOffset
-
         fm = QFontMetrics(font)
+        # X
         if alignment == 0:  # Left
-            xPosition = xOffset
-        if alignment == 1:  # Middle
-            xPosition = xOffset - fm.width(titleText) / 2
+            xPosition = xOffset + 20
+        if alignment == 1:  # Center
+            xPosition = xResolution / 2 - fm.width(titleText) / 2 + xOffset
         if alignment == 2:  # Right
-            xPosition = xOffset - fm.width(titleText)
+            xPosition = xResolution - fm.width(titleText) - xOffset - 20
+        # Y
+        yPosition = yResolution / 2 + fm.height() / 2 - yOffset
+        # Draw
         painter.drawText(xPosition, yPosition, titleText)
         painter.end()
 
@@ -105,46 +113,63 @@ class Core:
         strio.seek(0)
         return Image.open(strio)
 
-    def drawBars(self, spectrum, image, color):
+    def drawBars(
+        self,
+        spectrum,
+        image,
+        color,
+        xResolution,
+        yResolution,
+        count=63,
+        mult=4,
+        width=10,
+        gap=10,
+        border=5,
+        border_opacity=50,
+        margin=15,
+        baseline_spread=40,
+    ):
+        im = image.copy()
+        draw = ImageDraw.Draw(im, "RGBA")
+        border_color = color + (border_opacity,)
 
-        imTop = Image.new("RGBA", (1280, 360))
-        draw = ImageDraw.Draw(imTop)
-        r, g, b = color
-        color2 = (r, g, b, 50)
-        for j in range(0, 63):
-            draw.rectangle(
-                (10 + j * 20, 325, 10 + j * 20 + 20, 325 - spectrum[j * 4] * 1 - 10),
-                fill=color2,
-            )
-            draw.rectangle(
-                (15 + j * 20, 320, 15 + j * 20 + 10, 320 - spectrum[j * 4] * 1),
-                fill=color,
-            )
-
-        imBottom = imTop.transpose(Image.FLIP_TOP_BOTTOM)
-
-        im = Image.new("RGB", (1280, 720), "black")
-        im.paste(image, (0, 0))
-        im.paste(imTop, (0, 0), mask=imTop)
-        im.paste(imBottom, (0, 360), mask=imBottom)
+        for d in (1, -1):  # Top and bottom mirror
+            baseline = yResolution / 2 - d * baseline_spread
+            for j in range(count):
+                # (x0, y0, x1, y1)
+                # border
+                if border_opacity > 0:
+                    draw.rectangle(
+                        (
+                            margin + j * (width + gap) - border,
+                            baseline + d * border,
+                            margin + j * (width + gap) + width - 1 + border,
+                            baseline - d * (spectrum[j * mult] + border),
+                        ),
+                        fill=border_color,
+                    )
+                # main
+                draw.rectangle(
+                    (
+                        margin + j * (width + gap),
+                        baseline,
+                        margin + j * (width + gap) + width - 1,
+                        baseline - d * spectrum[j * mult],
+                    ),
+                    fill=color,
+                )
 
         return im
 
     def readAudioFile(self, filename):
-        command = [
-            self.FFMPEG_BIN,
-            "-i",
-            filename,
-            "-f",
-            "s16le",
-            "-acodec",
-            "pcm_s16le",
-            "-ar",
-            "44100",  # ouput will have 44100 Hz
-            "-ac",
-            "1",  # mono (set to '2' for stereo)
-            "-",
-        ]
+        rate = 44100
+        command = [self.FFMPEG_BIN]
+        command += ["-i", filename]
+        command += ["-f", "s16le"]
+        command += ["-acodec", "pcm_s16le"]
+        command += ["-ar", str(rate)]
+        command += ["-ac", "1"]  # mono
+        command += ["-"]  # to stdout
         in_pipe = subprocess.Popen(
             command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10 ** 8
         )
@@ -152,8 +177,8 @@ class Core:
         completeAudioArray = numpy.empty(0, dtype="int16")
 
         while True:
-            # read 2 seconds of audio
-            raw_audio = in_pipe.stdout.read(88200 * 4)
+            # read 4 seconds of audio (samplerate * 2 bytes * 4 sec)
+            raw_audio = in_pipe.stdout.read(rate * 2 * 4)
             if len(raw_audio) == 0:
                 break
             audio_array = numpy.fromstring(raw_audio, dtype="int16")
@@ -165,7 +190,7 @@ class Core:
 
         # add 0s the end
         completeAudioArrayCopy = numpy.zeros(
-            len(completeAudioArray) + 44100, dtype="int16"
+            len(completeAudioArray) + rate, dtype="int16"
         )
         completeAudioArrayCopy[: len(completeAudioArray)] = completeAudioArray
         completeAudioArray = completeAudioArrayCopy
